@@ -1,232 +1,178 @@
 'use client';
 
-import { useState } from 'react';
-import CardGrid from '../components/CardGrid';
-import ConfidenceMeter from '../components/ConfidenceMeter';
+import { useEffect, useMemo, useState } from 'react';
+import ConfidenceBar from '@/components/ConfidenceBar';
+import EVCards from '@/components/EVCards';
+import EVLineChart from '@/components/EVLineChart';
+import HandInput from '@/components/HandInput';
+import HistoryPanel from '@/components/HistoryPanel';
+import LogsViewer from '@/components/LogsViewer';
+import RecommendationCard from '@/components/RecommendationCard';
+import ShoeEditor from '@/components/ShoeEditor';
+import { createDefaultShoe, handTotal } from '@/lib/baccarat';
+import { GameMode, Outcome, PredictionResult, Rank, ShoeState, WindsurfResponse } from '@/lib/types';
 
-type Card = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
-type Result = 'Player' | 'Banker';
+const STORAGE_KEY = 'baccarat-oracle-state';
+
+interface LocalState {
+  history: Outcome[];
+  shoe: ShoeState;
+  mode: GameMode;
+}
+
+const EMPTY_EV = { Banker: 0, Player: 0, Tie: 0 };
 
 export default function Home() {
-  /* =========================
-     CURRENT HAND (INPUT ONLY)
-     ========================= */
-  const [playerCards, setPlayerCards] = useState<Card[]>([]);
-  const [bankerCards, setBankerCards] = useState<Card[]>([]);
+  const [playerCards, setPlayerCards] = useState<Rank[]>(['4', '6']);
+  const [bankerCards, setBankerCards] = useState<Rank[]>(['5', '7']);
+  const [history, setHistory] = useState<Outcome[]>(['Banker', 'Player', 'Banker']);
+  const [shoe, setShoe] = useState<ShoeState>(createDefaultShoe(8));
+  const [mode, setMode] = useState<GameMode>('standard');
 
-  /* =========================
-     SESSION MEMORY
-     ========================= */
-  const [results, setResults] = useState<Result[]>([]);
-  const [sessionHands, setSessionHands] = useState(0);
+  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [predicting, setPredicting] = useState(false);
+  const [windsurfing, setWindsurfing] = useState(false);
+  const [windsurf, setWindsurf] = useState<WindsurfResponse | null>(null);
 
-  /* =========================
-     ADVISOR OUTPUT
-     ========================= */
-  const [recommendation, setRecommendation] =
-    useState<'Player' | 'Banker' | 'DO NOT PLAY'>('DO NOT PLAY');
+  useEffect(() => {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as LocalState;
+        setHistory(parsed.history ?? []);
+        setShoe(parsed.shoe ?? createDefaultShoe(8));
+        setMode(parsed.mode ?? 'standard');
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+  }, []);
 
-  const [ev, setEv] = useState(0);
-  const [confidence, setConfidence] = useState(0);
-  const [advisorReason, setAdvisorReason] =
-    useState('Not enough historical data');
+  useEffect(() => {
+    const payload: LocalState = { history, shoe, mode };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [history, shoe, mode]);
 
-  /* =========================
-     DISCIPLINE METRICS
-     ========================= */
-  const [skipCount, setSkipCount] = useState(0);
-
-  /* =========================
-     HELPERS
-     ========================= */
-  function baccaratValue(card: Card) {
-    if (card === 'A') return 1;
-    if (['10', 'J', 'Q', 'K'].includes(card)) return 0;
-    return parseInt(card, 10);
-  }
-
-  function handTotal(cards: Card[]) {
-    return cards.reduce((sum, c) => sum + baccaratValue(c), 0) % 10;
-  }
-
-  function evaluateHand(): Result {
+  const currentOutcome = useMemo<Outcome>(() => {
     const p = handTotal(playerCards);
     const b = handTotal(bankerCards);
-    return p >= b ? 'Player' : 'Banker';
-  }
+    if (p > b) return 'Player';
+    if (b > p) return 'Banker';
+    return 'Tie';
+  }, [playerCards, bankerCards]);
 
-  /* =========================
-     DONE = RECORD HAND ONLY
-     ========================= */
-  function handleDone() {
-    if (playerCards.length === 0 || bankerCards.length === 0) return;
-
-    const outcome = evaluateHand();
-
-    // Record outcome
-    setResults(prev => [...prev, outcome]);
-    setSessionHands(prev => prev + 1);
-
-    const totalHands = results.length + 1;
-
-    // -------------------------
-    // ADVISOR LOGIC (HONEST)
-    // -------------------------
-    if (totalHands < 12) {
-      setRecommendation('DO NOT PLAY');
-      setAdvisorReason('Not enough historical data');
-      setConfidence(0);
-      setEv(0);
-      setSkipCount(prev => prev + 1);
-    } else {
-      const allResults = [...results, outcome];
-      const playerWins = allResults.filter(r => r === 'Player').length;
-      const bankerWins = allResults.length - playerWins;
-
-      const playerRate = playerWins / allResults.length;
-      const bankerRate = bankerWins / allResults.length;
-
-      const playerEV = playerRate - bankerRate;
-      const bankerEV = bankerRate * 0.95 - playerRate;
-
-      if (playerEV > bankerEV && playerEV > 0) {
-        setRecommendation('Player');
-        setEv(Number((playerEV * 100).toFixed(2)));
-      } else if (bankerEV > 0) {
-        setRecommendation('Banker');
-        setEv(Number((bankerEV * 100).toFixed(2)));
-      } else {
-        setRecommendation('DO NOT PLAY');
-        setAdvisorReason('Negative EV zone');
-        setSkipCount(prev => prev + 1);
-      }
-
-      const conf =
-        Math.min(allResults.length / 300, 1) * 30 +
-        Math.min(Math.abs(Math.max(playerEV, bankerEV)) * 100, 40);
-
-      setConfidence(Math.round(conf));
+  async function predictNow() {
+    setPredicting(true);
+    try {
+      const res = await fetch('/api/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history, shoe, mode, iterations: 7000 }),
+      });
+      const json = (await res.json()) as PredictionResult;
+      setPrediction(json);
+    } finally {
+      setPredicting(false);
     }
+  }
 
-    // ✅ AUTO-RESET FOR NEXT HAND
+  async function runWindsurf() {
+    setWindsurfing(true);
+    try {
+      const res = await fetch('/api/windsurf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history, shoe, mode, repeats: 60, iterationsPerRepeat: 1800 }),
+      });
+      const json = (await res.json()) as WindsurfResponse;
+      setWindsurf(json);
+    } finally {
+      setWindsurfing(false);
+    }
+  }
+
+  function adjustShoe(rank: Rank, value: number) {
+    setShoe((prev) => ({ ...prev, [rank]: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0 }));
+  }
+
+  function recordHand() {
+    setHistory((prev) => [...prev, currentOutcome]);
     setPlayerCards([]);
     setBankerCards([]);
   }
 
-  function resetShoe() {
-    setResults([]);
-    setSessionHands(0);
-    setRecommendation('DO NOT PLAY');
-    setConfidence(0);
-    setEv(0);
-    setAdvisorReason('New shoe');
-    setSkipCount(0);
-    setPlayerCards([]);
-    setBankerCards([]);
-  }
+  const chartData = windsurf?.repeats.map((row) => ({
+    repeat: row.repeat,
+    banker: Number((row.ev.Banker * 100).toFixed(2)),
+    player: Number((row.ev.Player * 100).toFixed(2)),
+    tie: Number((row.ev.Tie * 100).toFixed(2)),
+  })) ?? [{ repeat: 0, banker: 0, player: 0, tie: 0 }];
 
-  /* =========================
-     UI
-     ========================= */
   return (
-    <main className="min-h-screen bg-green-900 text-white p-6">
-      <h1 className="text-3xl font-bold mb-6">
-        Baccarat Decision Assistant
-      </h1>
-
-      <div className="grid grid-cols-3 gap-6 items-start">
-
-        {/* PLAYER */}
-        <div className="bg-green-800 p-4 rounded">
-          <h2 className="text-xl mb-2">Player Cards</h2>
-
-          <CardGrid
-            disabled={false}
-            onSelect={(c: Card) =>
-              setPlayerCards(p => [...p, c])
-            }
-          />
-
-          <div className="mt-2 text-sm">
-            {playerCards.map((c, i) => (
-              <span
-                key={i}
-                className="mr-1 px-2 py-1 bg-white text-black rounded"
-              >
-                {c}
-              </span>
-            ))}
+    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 sm:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Baccarat Oracle · Predictor + Windsurf</h1>
+            <p className="text-sm text-slate-400">Full-stack Next.js App Router implementation, tuned for Vercel deployment.</p>
           </div>
-        </div>
-
-        {/* CENTER */}
-        <div className="bg-black p-4 rounded text-center">
-          <div className="text-sm mb-1">
-            Best statistical next bet
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMode('standard')}
+              className={`rounded px-3 py-2 text-xs ${mode === 'standard' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800'}`}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('no_commission')}
+              className={`rounded px-3 py-2 text-xs ${mode === 'no_commission' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800'}`}
+            >
+              No Commission
+            </button>
           </div>
+        </header>
 
-          <div className="text-3xl font-bold text-yellow-400">
-            {recommendation}
-          </div>
-
-          {recommendation !== 'DO NOT PLAY' && (
-            <div className="text-sm mt-1">EV: {ev}%</div>
-          )}
-
-          {recommendation === 'DO NOT PLAY' && (
-            <div className="text-red-400 text-sm mt-1">
-              🚫 {advisorReason}
+        <section className="grid gap-4 lg:grid-cols-3">
+          <div className="space-y-4 lg:col-span-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              <HandInput title="Player cards" cards={playerCards} onAdd={(r) => setPlayerCards((p) => [...p, r])} onUndo={() => setPlayerCards((p) => p.slice(0, -1))} />
+              <HandInput title="Banker cards" cards={bankerCards} onAdd={(r) => setBankerCards((p) => [...p, r])} onUndo={() => setBankerCards((p) => p.slice(0, -1))} />
             </div>
-          )}
 
-          <ConfidenceMeter value={confidence} />
-
-          <button
-            onClick={handleDone}
-            className="mt-4 w-full bg-yellow-400 text-black font-bold py-3 rounded text-lg"
-          >
-            DONE
-          </button>
-
-          <button
-            onClick={resetShoe}
-            className="mt-2 text-sm text-red-300 underline"
-          >
-            Reset Shoe
-          </button>
-
-          <div className="mt-3 text-xs">
-            Session hands recorded: {sessionHands}
+            <ShoeEditor shoe={shoe} onChange={adjustShoe} onReset={() => setShoe(createDefaultShoe(8))} />
+            <EVLineChart data={chartData} />
+            <LogsViewer logs={windsurf?.logs ?? []} />
           </div>
 
-          <div className="text-xs">
-            Skipped bad spots: {skipCount}
+          <div className="space-y-4">
+            <RecommendationCard recommendation={prediction?.recommendation ?? 'Banker'} />
+            <EVCards ev={prediction?.ev ?? EMPTY_EV} />
+            <ConfidenceBar confidence={prediction?.confidence ?? 0} />
+            <HistoryPanel history={history} onClear={() => setHistory([])} />
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+              <p className="text-sm text-slate-300">Current hand eval: <span className="font-semibold text-cyan-300">{currentOutcome}</span></p>
+              <div className="mt-3 grid gap-2">
+                <button type="button" onClick={recordHand} className="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">
+                  Record hand to history
+                </button>
+                <button type="button" onClick={predictNow} disabled={predicting} className="rounded bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60">
+                  {predicting ? 'Predicting...' : 'Run predictor'}
+                </button>
+                <button type="button" onClick={runWindsurf} disabled={windsurfing} className="rounded bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                  {windsurfing ? 'Windsurf running...' : 'Run windsurf mode'}
+                </button>
+              </div>
+              {windsurf?.progress.at(-1) && (
+                <p className="mt-3 text-xs text-slate-400">
+                  Progress: {windsurf.progress.at(-1)?.progress}% · Best: {windsurf.bestRecommendation}
+                </p>
+              )}
+            </section>
           </div>
-        </div>
-
-        {/* BANKER */}
-        <div className="bg-green-800 p-4 rounded">
-          <h2 className="text-xl mb-2">Banker Cards</h2>
-
-          <CardGrid
-            disabled={false}
-            onSelect={(c: Card) =>
-              setBankerCards(b => [...b, c])
-            }
-          />
-
-          <div className="mt-2 text-sm">
-            {bankerCards.map((c, i) => (
-              <span
-                key={i}
-                className="mr-1 px-2 py-1 bg-white text-black rounded"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-        </div>
-
+        </section>
       </div>
     </main>
   );
