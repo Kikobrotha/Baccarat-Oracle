@@ -204,14 +204,14 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-green-950 via-green-900 to-green-950 text-white p-4 md:p-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-4 md:mb-6 space-y-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Baccarat Decision Assistant</h1>
-              <p className="text-green-100/75 text-sm mt-1">Composition-based next-hand estimator with Tie support</p>
-            </div>
+        <div className="mb-4 md:mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Baccarat Decision Assistant</h1>
+            <p className="text-green-100/75 text-sm mt-1">Composition-based next-hand estimator with Tie support</p>
+          </div>
 
-            <div className="w-full md:w-auto">
+          <div className="w-full md:w-auto flex flex-col md:flex-row gap-3 md:items-end">
+            <div>
               <label htmlFor="layoutPreset" className="mb-1.5 block text-xs uppercase tracking-wide text-green-100/70">
                 Layout Preset
               </label>
@@ -228,31 +228,16 @@ export default function Home() {
                 ))}
               </select>
             </div>
-          </div>
 
-          <div className="hidden md:flex md:flex-wrap md:items-center md:gap-2 rounded-xl border border-white/10 bg-black/20 p-2">
-            {layoutOptions.map(option => {
-              const active = selectedLayout === option.value;
-              return (
-                <button
-                  key={option.value}
-                  onClick={() => setSelectedLayout(option.value)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${active
-                    ? 'bg-yellow-300 text-black shadow-md shadow-yellow-300/25'
-                    : 'bg-white/5 text-green-50 hover:bg-white/10'}`}
-                  aria-pressed={active}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-
-            <div className="ml-auto flex items-center gap-2 text-xs">
-              <span className="text-green-100/75">Banker Mode</span>
+            <div>
+              <label htmlFor="bankerMode" className="mb-1.5 block text-xs uppercase tracking-wide text-green-100/70">
+                Banker Mode
+              </label>
               <select
+                id="bankerMode"
                 value={mode}
                 onChange={e => setMode(e.target.value as BettingMode)}
-                className="rounded-md border border-white/20 bg-green-900/70 px-2 py-1 text-xs"
+                className="w-full md:min-w-56 rounded-lg border border-white/20 bg-green-900/80 px-3 py-2 text-sm font-medium shadow-md outline-none transition focus:border-yellow-300 focus:ring-2 focus:ring-yellow-300/40"
               >
                 <option value="standard">Standard (5% commission)</option>
                 <option value="no-commission">No Commission (Banker 6 pays 0.5)</option>
