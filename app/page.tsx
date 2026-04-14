@@ -62,6 +62,16 @@ export default function Home() {
   const [confidence, setConfidence] = useState(0);
   const [advisorReason, setAdvisorReason] =
     useState('Need at least 12 completed hands before betting.');
+  const [predictionProbabilities, setPredictionProbabilities] = useState({
+    player: 0,
+    banker: 0,
+    tie: 0,
+  });
+  const [evBySide, setEvBySide] = useState({
+    player: 0,
+    banker: 0,
+    tie: 0,
+  });
 
   const [skipCount, setSkipCount] = useState(0);
   const [selectedLayout, setSelectedLayout] = useState<LayoutPreset>(() => {
@@ -166,6 +176,18 @@ export default function Home() {
     setAdvisorReason(recommendationData.reason);
     setConfidence(recommendationData.confidence);
     setEv(Number((recommendationData.bestEV * 100).toFixed(2)));
+    setPredictionProbabilities(recommendationData.probabilities);
+
+    const mappedEVs = recommendationData.options.reduce(
+      (acc, option) => {
+        if (option.side === 'Player') acc.player = Number((option.ev * 100).toFixed(2));
+        if (option.side === 'Banker') acc.banker = Number((option.ev * 100).toFixed(2));
+        if (option.side === 'Tie') acc.tie = Number((option.ev * 100).toFixed(2));
+        return acc;
+      },
+      { player: 0, banker: 0, tie: 0 },
+    );
+    setEvBySide(mappedEVs);
 
     if (recommendationData.action === 'DO NOT PLAY') {
       setSkipCount(prev => prev + 1);
@@ -186,6 +208,37 @@ export default function Home() {
     setPlayerCards([]);
     setBankerCards([]);
     setUsedCards([]);
+    setPredictionProbabilities({ player: 0, banker: 0, tie: 0 });
+    setEvBySide({ player: 0, banker: 0, tie: 0 });
+  }
+
+  const metricRows = [
+    {
+      label: 'Player',
+      probability: predictionProbabilities.player,
+      expectedValue: evBySide.player,
+      colorClass: 'text-blue-200',
+    },
+    {
+      label: 'Banker',
+      probability: predictionProbabilities.banker,
+      expectedValue: evBySide.banker,
+      colorClass: 'text-red-200',
+    },
+    {
+      label: 'Tie',
+      probability: predictionProbabilities.tie,
+      expectedValue: evBySide.tie,
+      colorClass: 'text-purple-200',
+    },
+  ];
+
+  function formatProbability(value: number) {
+    return `${(value * 100).toFixed(2)}%`;
+  }
+
+  function formatEV(value: number) {
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   }
 
   const panelBase = isCompact
@@ -250,6 +303,27 @@ export default function Home() {
             )}
 
             <ConfidenceMeter value={confidence} compact={isCompact} />
+
+            <div className="mt-4 rounded-xl border border-white/15 bg-green-950/45 p-3 text-left">
+              <div className="mb-2 text-[11px] md:text-xs uppercase tracking-[0.14em] text-green-100/75">
+                Probabilities & EV (next hand)
+              </div>
+              <div className="space-y-1.5">
+                {metricRows.map(row => (
+                  <div
+                    key={row.label}
+                    className="grid grid-cols-[1.1fr_1fr_1fr] items-center rounded-md bg-black/25 px-2.5 py-2 text-xs md:text-sm"
+                  >
+                    <span className={`font-semibold ${row.colorClass}`}>{row.label}</span>
+                    <span className="text-green-100/90">P: {formatProbability(row.probability)}</span>
+                    <span className="text-yellow-100">EV: {formatEV(row.expectedValue)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-[11px] md:text-xs text-green-100/70">
+                Recommendation focus: <span className="font-semibold text-yellow-200">{recommendation}</span>
+              </div>
+            </div>
 
             <button
               onClick={handleDone}
