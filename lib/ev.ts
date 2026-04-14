@@ -64,11 +64,13 @@ export function calculateBetEVFromPrediction(
 }
 
 function getBestPositiveEV(ev: BetEVBreakdown): { side: BetAction; ev: number } {
-  const ranked: Array<{ side: BetSide; ev: number }> = [
-    { side: 'PLAYER', ev: ev.player },
-    { side: 'BANKER', ev: ev.banker },
-    { side: 'TIE', ev: ev.tie },
-  ].sort((a, b) => b.ev - a.ev);
+  const candidateBets: Array<{ side: BetSide; ev: number }> = [
+    { side: 'PLAYER' as const, ev: ev.player },
+    { side: 'BANKER' as const, ev: ev.banker },
+    { side: 'TIE' as const, ev: ev.tie },
+  ];
+
+  const ranked = candidateBets.sort((a, b) => b.ev - a.ev);
 
   const best = ranked[0];
 
