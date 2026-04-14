@@ -1,4 +1,4 @@
-import { RecommendationData, RecommendationOption } from './recommendation';
+import { RecommendationAction, RecommendationData, RecommendationOption, RecommendationSide } from './recommendation';
 import { BaccaratResult, resolveHandResult } from './baccarat';
 import { Card } from './shoe';
 
@@ -28,6 +28,8 @@ export interface SessionResultStats {
 }
 
 export const DEFAULT_REASON = 'Need at least 12 completed hands before betting.';
+export const DEFAULT_LEAN_LABEL = 'Waiting for threshold';
+export const DEFAULT_ACTION: RecommendationAction = 'DO NOT PLAY';
 
 export const DEFAULT_PROBABILITIES: ProbabilitiesBySide = {
   player: 0,
@@ -84,9 +86,14 @@ export function formatEV(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
+export function formatLean(bestLean: RecommendationSide | null): string {
+  return bestLean ?? DEFAULT_LEAN_LABEL;
+}
+
 export function toPredictionState(recommendationData: RecommendationData) {
   return {
-    recommendation: recommendationData.action,
+    action: recommendationData.action,
+    bestLean: formatLean(recommendationData.bestLean),
     advisorReason: recommendationData.reason,
     confidence: recommendationData.confidence,
     ev: toEvPercent(recommendationData.bestEV),

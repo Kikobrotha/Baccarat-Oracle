@@ -1,10 +1,11 @@
 import { calculateEV, BetEVBreakdown, BetSide } from './ev';
 import { buildRemainingShoeFromUsedCards, Card, countCards } from './shoe';
 
-export type RecommendationAction = 'Player' | 'Banker' | 'Tie' | 'DO NOT PLAY';
+export type RecommendationSide = 'Player' | 'Banker' | 'Tie';
+export type RecommendationAction = 'PLAY' | 'CAUTIOUS' | 'DO NOT PLAY';
 
 export interface RecommendationOption {
-  side: RecommendationAction;
+  side: RecommendationSide;
   ev: number;
   lowerBound: number;
   playable: boolean;
@@ -12,6 +13,7 @@ export interface RecommendationOption {
 
 export interface RecommendationData {
   action: RecommendationAction;
+  bestLean: RecommendationSide | null;
   reason: string;
   confidence: number;
   bestEV: number;
@@ -63,10 +65,14 @@ function varianceForBet(side: BetSide, ev: number, probs: { player: number; bank
   return Math.max(0, e2 - ev * ev);
 }
 
-function toAction(side: BetSide): RecommendationAction {
+function toSide(side: BetSide): RecommendationSide {
   if (side === 'PLAYER') return 'Player';
   if (side === 'BANKER') return 'Banker';
   return 'Tie';
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function buildOption(side: BetSide, ev: BetEVBreakdown, probs: { player: number; banker: number; tie: number }, n: number, z: number, minPlayableEV: number): RecommendationOption {
@@ -76,10 +82,61 @@ function buildOption(side: BetSide, ev: BetEVBreakdown, probs: { player: number;
   const lowerBound = expectedValue - z * standardError;
 
   return {
-    side: toAction(side),
+    side: toSide(side),
     ev: expectedValue,
     lowerBound,
     playable: expectedValue >= minPlayableEV && lowerBound > 0,
+  };
+}
+
+function evaluateAction(
+  best: RecommendationOption,
+  secondBest: RecommendationOption | undefined,
+  resolvedHands: number,
+  config: Required<RecommendationSettings>,
+): { action: RecommendationAction; confidence: number; reason: string } {
+  const margin = secondBest ? best.ev - secondBest.ev : 0;
+  const evStrength = clamp(best.ev / (config.minPlayableEV * 2), -1.25, 2.25);
+  const lowerBoundStrength = clamp(best.lowerBound / config.minPlayableEV, -1.25, 2.25);
+  const separationStrength = clamp(margin / Math.max(config.minPlayableEV, 0.0001), -1.5, 2);
+  const handsStrength = clamp((resolvedHands - config.minHands) / 28, 0, 1.2);
+
+  const score =
+    evStrength * 0.42 +
+    lowerBoundStrength * 0.33 +
+    separationStrength * 0.17 +
+    handsStrength * 0.08;
+
+  const confidence = clamp(Math.round(50 + score * 18), 20, 96);
+
+  if (best.ev <= 0) {
+    return {
+      action: 'DO NOT PLAY',
+      confidence: clamp(confidence - 8, 15, 88),
+      reason: 'Best statistical lean is negative EV after uncertainty adjustment.',
+    };
+  }
+
+  if (score >= 0.9 && best.lowerBound >= -config.minPlayableEV * 0.1) {
+    return {
+      action: 'PLAY',
+      confidence: clamp(confidence + 8, 35, 98),
+      reason: 'Strong positive lean with supportive uncertainty-adjusted EV.',
+    };
+  }
+
+  if (score >= 0.15) {
+    return {
+      action: 'CAUTIOUS',
+      confidence: clamp(confidence, 30, 92),
+      reason: 'Weak-to-moderate edge; lean is present but uncertainty remains.',
+    };
+  }
+
+  return {
+    action: 'DO NOT PLAY',
+    confidence: clamp(confidence - 6, 20, 86),
+    reason: 'No meaningful edge after accounting for uncertainty.',
   };
 }
 
@@ -93,6 +150,7 @@ export function getRecommendationFromSimulation(
   if (resolvedHands < config.minHands) {
     return {
       action: 'DO NOT PLAY',
+      bestLean: null,
       reason: `Need at least ${config.minHands} completed hands before betting.`,
       confidence: 0,
       bestEV: 0,
@@ -108,6 +166,7 @@ export function getRecommendationFromSimulation(
   if (countCards(remainingShoe) < 6) {
     return {
       action: 'DO NOT PLAY',
+      bestLean: null,
       reason: 'Shoe is too depleted to produce a reliable simulation.',
       confidence: 0,
       bestEV: 0,
@@ -133,29 +192,14 @@ export function getRecommendationFromSimulation(
   ].sort((a, b) => b.ev - a.ev);
 
   const best = options[0];
-
-  if (!best.playable) {
-    return {
-      action: 'DO NOT PLAY',
-      reason: 'No bet has enough EV after simulation uncertainty adjustment.',
-      confidence: Math.max(5, Math.min(70, Math.round((best.ev / config.minPlayableEV) * 40))),
-      bestEV: best.ev,
-      bestLowerBound: best.lowerBound,
-      probabilities,
-      options,
-      sampleCount: result.prediction.sampleCount,
-    };
-  }
-
-  const confidence = Math.max(
-    35,
-    Math.min(99, Math.round(((best.lowerBound / Math.max(best.ev, 0.0001)) * 100 + Math.min(best.ev * 200, 25)))),
-  );
+  const secondBest = options[1];
+  const actionEvaluation = evaluateAction(best, secondBest, resolvedHands, config);
 
   return {
-    action: best.side,
-    reason: 'Best EV with a positive uncertainty-adjusted lower bound.',
-    confidence,
+    action: actionEvaluation.action,
+    bestLean: best.side,
+    reason: actionEvaluation.reason,
+    confidence: actionEvaluation.confidence,
     bestEV: best.ev,
     bestLowerBound: best.lowerBound,
     probabilities,

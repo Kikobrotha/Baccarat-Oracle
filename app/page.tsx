@@ -7,9 +7,12 @@ import { getRecommendationFromSimulation, RecommendationAction } from '../lib/re
 import { Card } from '../lib/shoe';
 import {
   cardTokenClass,
+  DEFAULT_ACTION,
+  DEFAULT_LEAN_LABEL,
   DEFAULT_PROBABILITIES,
   DEFAULT_REASON,
   formatEV,
+  formatLean,
   formatProbability,
   getLayoutClasses,
   getSessionResultStats,
@@ -45,7 +48,8 @@ export default function Home() {
   const [usedCards, setUsedCards] = useState<Card[]>([]);
   const [sessionHands, setSessionHands] = useState(0);
 
-  const [recommendation, setRecommendation] = useState<RecommendationAction>('DO NOT PLAY');
+  const [actionLabel, setActionLabel] = useState<RecommendationAction>(DEFAULT_ACTION);
+  const [bestLean, setBestLean] = useState(DEFAULT_LEAN_LABEL);
 
   const [ev, setEv] = useState(0);
   const [confidence, setConfidence] = useState(0);
@@ -91,7 +95,8 @@ export default function Home() {
 
     const recommendationData = getRecommendationFromSimulation(allUsedCards, totalHands);
 
-    setRecommendation(recommendationData.action);
+    setActionLabel(recommendationData.action);
+    setBestLean(formatLean(recommendationData.bestLean));
     setAdvisorReason(recommendationData.reason);
     setConfidence(recommendationData.confidence);
     setEv(toEvPercent(recommendationData.bestEV));
@@ -109,7 +114,8 @@ export default function Home() {
   function resetShoe() {
     setResults([]);
     setSessionHands(0);
-    setRecommendation('DO NOT PLAY');
+    setActionLabel(DEFAULT_ACTION);
+    setBestLean(DEFAULT_LEAN_LABEL);
     setConfidence(0);
     setEv(0);
     setAdvisorReason(DEFAULT_REASON);
@@ -192,15 +198,24 @@ export default function Home() {
           <section
             className={`${isCompact ? 'rounded-xl p-3' : 'rounded-2xl p-4 md:p-6'} bg-black/70 text-center shadow-2xl shadow-black/30 ${layoutClasses.center} ${layoutClasses.centerShell} transition-all duration-300`}
           >
-            <div className="text-xs md:text-sm uppercase tracking-[0.18em] text-green-100/75 mb-2">Best statistical next bet</div>
-            <div className="text-3xl md:text-4xl font-bold text-yellow-300 drop-shadow-sm tracking-wide">{recommendation}</div>
+            <div className="text-xs md:text-sm uppercase tracking-[0.18em] text-green-100/75 mb-2">Best statistical lean</div>
+            <div className="text-3xl md:text-4xl font-bold text-yellow-300 drop-shadow-sm tracking-wide">{bestLean}</div>
 
-            {recommendation !== 'DO NOT PLAY' ? (
-              <div className="text-sm mt-2 text-green-100/95">Expected value: <span className="font-semibold text-yellow-200">{ev}%</span></div>
-            ) : (
-              <div className="text-red-300 text-sm mt-2">🚫 {advisorReason}</div>
-            )}
+            <div className="mt-3 text-xs md:text-sm uppercase tracking-[0.18em] text-green-100/75">Action</div>
+            <div
+              className={`text-2xl md:text-3xl font-extrabold mt-1 ${
+                actionLabel === 'PLAY' ? 'text-green-300' : actionLabel === 'CAUTIOUS' ? 'text-amber-300' : 'text-red-300'
+              }`}
+            >
+              {actionLabel}
+            </div>
 
+            <div className="text-sm mt-2 text-green-100/95">
+              Lean EV: <span className="font-semibold text-yellow-200">{ev}%</span>
+            </div>
+            <div className="text-xs mt-2 text-green-100/80">{advisorReason}</div>
+
+            <div className="mt-3 text-sm font-medium text-green-100">Confidence: {confidence}%</div>
             <ConfidenceMeter value={confidence} compact={isCompact} />
 
             <div className="mt-4 rounded-xl border border-white/15 bg-green-950/45 p-3 text-left">
@@ -220,7 +235,7 @@ export default function Home() {
                 ))}
               </div>
               <div className="mt-2 text-[11px] md:text-xs text-green-100/70">
-                Recommendation focus: <span className="font-semibold text-yellow-200">{recommendation}</span>
+                Displayed lean: <span className="font-semibold text-yellow-200">{bestLean}</span>
               </div>
             </div>
 
