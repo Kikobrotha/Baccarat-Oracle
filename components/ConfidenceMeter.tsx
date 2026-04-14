@@ -1,14 +1,22 @@
-export default function ConfidenceMeter({ value }: { value: number }) {
+export default function ConfidenceMeter({
+  value,
+  compact = false,
+}: {
+  value: number;
+  compact?: boolean;
+}) {
   return (
-    <div className="w-full mt-3">
-      <div className="text-sm mb-1">Confidence</div>
-      <div className="w-full bg-gray-700 h-3 rounded">
+    <div className={`${compact ? 'mt-3' : 'mt-4'} w-full text-left`}>
+      <div className="mb-1.5 flex items-center justify-between text-xs tracking-wide text-green-100/80 uppercase">
+        <span>Confidence</span>
+        <span className="font-semibold text-green-100">{value}%</span>
+      </div>
+      <div className={`${compact ? 'h-2.5' : 'h-3'} w-full rounded-full bg-white/15 overflow-hidden`}>
         <div
-          className="h-3 rounded bg-yellow-400 transition-all duration-700"
+          className={`${compact ? 'h-2.5' : 'h-3'} rounded-full bg-gradient-to-r from-yellow-400 via-yellow-300 to-lime-300 transition-all duration-700 ease-out`}
           style={{ width: `${value}%` }}
         />
       </div>
-      <div className="text-xs mt-1">{value}%</div>
     </div>
   );
 }
