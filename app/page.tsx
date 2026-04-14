@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import CardGrid from '../components/CardGrid';
 import ConfidenceMeter from '../components/ConfidenceMeter';
+import { getRecommendationFromSimulation } from '../lib/recommendation';
 
 type Card = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
 type Result = 'Player' | 'Banker' | 'Tie';
@@ -51,15 +52,16 @@ export default function Home() {
   const [bankerCards, setBankerCards] = useState<Card[]>([]);
 
   const [results, setResults] = useState<Result[]>([]);
+  const [usedCards, setUsedCards] = useState<Card[]>([]);
   const [sessionHands, setSessionHands] = useState(0);
 
   const [recommendation, setRecommendation] =
-    useState<'Player' | 'Banker' | 'DO NOT PLAY'>('DO NOT PLAY');
+    useState<'Player' | 'Banker' | 'Tie' | 'DO NOT PLAY'>('DO NOT PLAY');
 
   const [ev, setEv] = useState(0);
   const [confidence, setConfidence] = useState(0);
   const [advisorReason, setAdvisorReason] =
-    useState('Not enough historical data');
+    useState('Need at least 12 completed hands before betting.');
 
   const [skipCount, setSkipCount] = useState(0);
   const [selectedLayout, setSelectedLayout] = useState<LayoutPreset>(() => {
@@ -150,52 +152,23 @@ export default function Home() {
     if (playerCards.length === 0 || bankerCards.length === 0) return;
 
     const outcome = evaluateHand();
-
-    setResults(prev => [...prev, outcome]);
-    setSessionHands(prev => prev + 1);
-
+    const handCards = [...playerCards, ...bankerCards];
+    const allUsedCards = [...usedCards, ...handCards];
     const totalHands = results.length + 1;
 
-    if (totalHands < 12) {
-      setRecommendation('DO NOT PLAY');
-      setAdvisorReason('Not enough historical data');
-      setConfidence(0);
-      setEv(0);
+    setResults(prev => [...prev, outcome]);
+    setUsedCards(allUsedCards);
+    setSessionHands(prev => prev + 1);
+
+    const recommendationData = getRecommendationFromSimulation(allUsedCards, totalHands);
+
+    setRecommendation(recommendationData.action);
+    setAdvisorReason(recommendationData.reason);
+    setConfidence(recommendationData.confidence);
+    setEv(Number((recommendationData.bestEV * 100).toFixed(2)));
+
+    if (recommendationData.action === 'DO NOT PLAY') {
       setSkipCount(prev => prev + 1);
-    } else {
-      const allResults = [...results, outcome];
-      const playerWins = allResults.filter(r => r === 'Player').length;
-      const bankerWins = allResults.filter(r => r === 'Banker').length;
-      const decisiveHands = playerWins + bankerWins;
-
-      const playerRate = decisiveHands > 0 ? playerWins / decisiveHands : 0;
-      const bankerRate = decisiveHands > 0 ? bankerWins / decisiveHands : 0;
-
-      const playerEV = playerRate - bankerRate;
-      const bankerEV = bankerRate * 0.95 - playerRate;
-
-      if (decisiveHands === 0) {
-        setRecommendation('DO NOT PLAY');
-        setAdvisorReason('Only ties recorded');
-        setEv(0);
-        setSkipCount(prev => prev + 1);
-      } else if (playerEV > bankerEV && playerEV > 0) {
-        setRecommendation('Player');
-        setEv(Number((playerEV * 100).toFixed(2)));
-      } else if (bankerEV > 0) {
-        setRecommendation('Banker');
-        setEv(Number((bankerEV * 100).toFixed(2)));
-      } else {
-        setRecommendation('DO NOT PLAY');
-        setAdvisorReason('Negative EV zone');
-        setSkipCount(prev => prev + 1);
-      }
-
-      const conf =
-        Math.min(allResults.length / 300, 1) * 30 +
-        Math.min(Math.abs(Math.max(playerEV, bankerEV)) * 100, 40);
-
-      setConfidence(Math.round(conf));
     }
 
     setPlayerCards([]);
@@ -208,10 +181,11 @@ export default function Home() {
     setRecommendation('DO NOT PLAY');
     setConfidence(0);
     setEv(0);
-    setAdvisorReason('New shoe');
+    setAdvisorReason('Need at least 12 completed hands before betting.');
     setSkipCount(0);
     setPlayerCards([]);
     setBankerCards([]);
+    setUsedCards([]);
   }
 
   const panelBase = isCompact
