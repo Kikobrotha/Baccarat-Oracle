@@ -211,7 +211,7 @@ export default function Home() {
               <p className="text-green-100/75 text-sm mt-1">Composition-based next-hand estimator with Tie support</p>
             </div>
 
-            <div className="w-full md:w-auto md:hidden">
+            <div className="w-full md:w-auto">
               <label htmlFor="layoutPreset" className="mb-1.5 block text-xs uppercase tracking-wide text-green-100/70">
                 Layout Preset
               </label>
@@ -219,7 +219,7 @@ export default function Home() {
                 id="layoutPreset"
                 value={selectedLayout}
                 onChange={e => setSelectedLayout(e.target.value as LayoutPreset)}
-                className="w-full rounded-lg border border-white/20 bg-green-900/80 px-3 py-2 text-sm font-medium shadow-md outline-none transition focus:border-yellow-300 focus:ring-2 focus:ring-yellow-300/40"
+                className="w-full md:min-w-56 rounded-lg border border-white/20 bg-green-900/80 px-3 py-2 text-sm font-medium shadow-md outline-none transition focus:border-yellow-300 focus:ring-2 focus:ring-yellow-300/40"
               >
                 {layoutOptions.map(option => (
                   <option key={option.value} value={option.value} className="text-white bg-green-950">
