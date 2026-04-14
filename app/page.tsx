@@ -5,7 +5,7 @@ import CardGrid from '../components/CardGrid';
 import ConfidenceMeter from '../components/ConfidenceMeter';
 
 type Card = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
-type Result = 'Player' | 'Banker';
+type Result = 'Player' | 'Banker' | 'Tie';
 type LayoutPreset =
   | 'classic'
   | 'focus-center'
@@ -142,7 +142,8 @@ export default function Home() {
   function evaluateHand(): Result {
     const p = handTotal(playerCards);
     const b = handTotal(bankerCards);
-    return p >= b ? 'Player' : 'Banker';
+    if (p === b) return 'Tie';
+    return p > b ? 'Player' : 'Banker';
   }
 
   function handleDone() {
@@ -164,15 +165,21 @@ export default function Home() {
     } else {
       const allResults = [...results, outcome];
       const playerWins = allResults.filter(r => r === 'Player').length;
-      const bankerWins = allResults.length - playerWins;
+      const bankerWins = allResults.filter(r => r === 'Banker').length;
+      const decisiveHands = playerWins + bankerWins;
 
-      const playerRate = playerWins / allResults.length;
-      const bankerRate = bankerWins / allResults.length;
+      const playerRate = decisiveHands > 0 ? playerWins / decisiveHands : 0;
+      const bankerRate = decisiveHands > 0 ? bankerWins / decisiveHands : 0;
 
       const playerEV = playerRate - bankerRate;
       const bankerEV = bankerRate * 0.95 - playerRate;
 
-      if (playerEV > bankerEV && playerEV > 0) {
+      if (decisiveHands === 0) {
+        setRecommendation('DO NOT PLAY');
+        setAdvisorReason('Only ties recorded');
+        setEv(0);
+        setSkipCount(prev => prev + 1);
+      } else if (playerEV > bankerEV && playerEV > 0) {
         setRecommendation('Player');
         setEv(Number((playerEV * 100).toFixed(2)));
       } else if (bankerEV > 0) {
