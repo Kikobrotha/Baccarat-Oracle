@@ -1,28 +1,58 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import CardGrid from '../components/CardGrid';
 import ConfidenceMeter from '../components/ConfidenceMeter';
 
 type Card = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
 type Result = 'Player' | 'Banker';
+type LayoutPreset =
+  | 'classic'
+  | 'focus-center'
+  | 'wide-table'
+  | 'compact'
+  | 'mobile-stacked'
+  | 'auto';
+
+const layoutOptions: { value: LayoutPreset; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'classic', label: 'Classic' },
+  { value: 'focus-center', label: 'Focus Center' },
+  { value: 'wide-table', label: 'Wide Table' },
+  { value: 'compact', label: 'Compact' },
+  { value: 'mobile-stacked', label: 'Mobile Stacked' },
+];
+
+function cardTokenClass(compact: boolean) {
+  return compact
+    ? 'mr-1 mb-1 inline-flex px-2 py-0.5 text-xs bg-white/95 text-black rounded-md'
+    : 'mr-1.5 mb-1.5 inline-flex px-2.5 py-1 text-sm bg-white/95 text-black rounded-md';
+}
+
+
+function useIsSmallScreen() {
+  return useSyncExternalStore(
+    callback => {
+      if (typeof window === 'undefined') {
+        return () => {};
+      }
+
+      const media = window.matchMedia('(max-width: 767px)');
+      media.addEventListener('change', callback);
+      return () => media.removeEventListener('change', callback);
+    },
+    () => (typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false),
+    () => false,
+  );
+}
 
 export default function Home() {
-  /* =========================
-     CURRENT HAND (INPUT ONLY)
-     ========================= */
   const [playerCards, setPlayerCards] = useState<Card[]>([]);
   const [bankerCards, setBankerCards] = useState<Card[]>([]);
 
-  /* =========================
-     SESSION MEMORY
-     ========================= */
   const [results, setResults] = useState<Result[]>([]);
   const [sessionHands, setSessionHands] = useState(0);
 
-  /* =========================
-     ADVISOR OUTPUT
-     ========================= */
   const [recommendation, setRecommendation] =
     useState<'Player' | 'Banker' | 'DO NOT PLAY'>('DO NOT PLAY');
 
@@ -31,14 +61,74 @@ export default function Home() {
   const [advisorReason, setAdvisorReason] =
     useState('Not enough historical data');
 
-  /* =========================
-     DISCIPLINE METRICS
-     ========================= */
   const [skipCount, setSkipCount] = useState(0);
+  const [selectedLayout, setSelectedLayout] = useState<LayoutPreset>(() => {
+    if (typeof window === 'undefined') return 'classic';
 
-  /* =========================
-     HELPERS
-     ========================= */
+    const saved = localStorage.getItem('baccarat-ui-layout') as LayoutPreset | null;
+    if (saved && layoutOptions.some(option => option.value === saved)) {
+      return saved;
+    }
+
+    return 'classic';
+  });
+  const isSmallScreen = useIsSmallScreen();
+
+  useEffect(() => {
+    localStorage.setItem('baccarat-ui-layout', selectedLayout);
+  }, [selectedLayout]);
+
+  const activeLayout = selectedLayout === 'auto'
+    ? (isSmallScreen ? 'mobile-stacked' : 'classic')
+    : selectedLayout;
+
+  const isCompact = activeLayout === 'compact';
+
+  const layoutClasses = useMemo(() => {
+    switch (activeLayout) {
+      case 'focus-center':
+        return {
+          grid: 'grid grid-cols-1 xl:grid-cols-[minmax(220px,0.7fr)_minmax(520px,1.6fr)_minmax(220px,0.7fr)] gap-4 md:gap-6 items-stretch',
+          player: 'xl:order-1',
+          center: 'xl:order-2',
+          banker: 'xl:order-3',
+          centerShell: 'ring-1 ring-yellow-300/50 shadow-2xl shadow-black/35',
+        };
+      case 'wide-table':
+        return {
+          grid: 'grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch',
+          player: '',
+          center: '',
+          banker: '',
+          centerShell: 'bg-gradient-to-b from-black/60 to-black/40 border border-white/15',
+        };
+      case 'compact':
+        return {
+          grid: 'grid grid-cols-1 lg:grid-cols-3 gap-3 items-start',
+          player: '',
+          center: '',
+          banker: '',
+          centerShell: 'border border-white/10',
+        };
+      case 'mobile-stacked':
+        return {
+          grid: 'grid grid-cols-1 gap-4 items-start max-w-xl mx-auto',
+          player: 'order-2',
+          center: 'order-1',
+          banker: 'order-3',
+          centerShell: 'ring-1 ring-yellow-300/40',
+        };
+      default:
+        return {
+          grid: 'grid grid-cols-1 xl:grid-cols-3 gap-6 items-start',
+          player: '',
+          center: '',
+          banker: '',
+          centerShell: 'border border-white/10',
+        };
+    }
+  }, [activeLayout]);
+
   function baccaratValue(card: Card) {
     if (card === 'A') return 1;
     if (['10', 'J', 'Q', 'K'].includes(card)) return 0;
@@ -55,23 +145,16 @@ export default function Home() {
     return p >= b ? 'Player' : 'Banker';
   }
 
-  /* =========================
-     DONE = RECORD HAND ONLY
-     ========================= */
   function handleDone() {
     if (playerCards.length === 0 || bankerCards.length === 0) return;
 
     const outcome = evaluateHand();
 
-    // Record outcome
     setResults(prev => [...prev, outcome]);
     setSessionHands(prev => prev + 1);
 
     const totalHands = results.length + 1;
 
-    // -------------------------
-    // ADVISOR LOGIC (HONEST)
-    // -------------------------
     if (totalHands < 12) {
       setRecommendation('DO NOT PLAY');
       setAdvisorReason('Not enough historical data');
@@ -108,7 +191,6 @@ export default function Home() {
       setConfidence(Math.round(conf));
     }
 
-    // ✅ AUTO-RESET FOR NEXT HAND
     setPlayerCards([]);
     setBankerCards([]);
   }
@@ -125,108 +207,105 @@ export default function Home() {
     setBankerCards([]);
   }
 
-  /* =========================
-     UI
-     ========================= */
+  const panelBase = isCompact
+    ? 'rounded-xl bg-green-800/75 p-3 shadow-lg shadow-black/20 backdrop-blur-sm'
+    : 'rounded-2xl bg-green-800/75 p-4 md:p-5 shadow-xl shadow-black/25 backdrop-blur-sm';
+
   return (
-    <main className="min-h-screen bg-green-900 text-white p-6">
-      <h1 className="text-3xl font-bold mb-6">
-        Baccarat Decision Assistant
-      </h1>
+    <main className="min-h-screen bg-gradient-to-b from-green-950 via-green-900 to-green-950 text-white p-4 md:p-6">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-4 md:mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Baccarat Decision Assistant</h1>
+            <p className="text-green-100/75 text-sm mt-1">Statistical recommendation interface</p>
+          </div>
 
-      <div className="grid grid-cols-3 gap-6 items-start">
-
-        {/* PLAYER */}
-        <div className="bg-green-800 p-4 rounded">
-          <h2 className="text-xl mb-2">Player Cards</h2>
-
-          <CardGrid
-            disabled={false}
-            onSelect={(c: Card) =>
-              setPlayerCards(p => [...p, c])
-            }
-          />
-
-          <div className="mt-2 text-sm">
-            {playerCards.map((c, i) => (
-              <span
-                key={i}
-                className="mr-1 px-2 py-1 bg-white text-black rounded"
-              >
-                {c}
-              </span>
-            ))}
+          <div className="w-full md:w-auto">
+            <label htmlFor="layoutPreset" className="mb-1.5 block text-xs uppercase tracking-wide text-green-100/70">
+              Layout Preset
+            </label>
+            <select
+              id="layoutPreset"
+              value={selectedLayout}
+              onChange={e => setSelectedLayout(e.target.value as LayoutPreset)}
+              className="w-full md:min-w-56 rounded-lg border border-white/20 bg-green-900/80 px-3 py-2 text-sm font-medium shadow-md outline-none transition focus:border-yellow-300 focus:ring-2 focus:ring-yellow-300/40"
+            >
+              {layoutOptions.map(option => (
+                <option key={option.value} value={option.value} className="text-white bg-green-950">
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* CENTER */}
-        <div className="bg-black p-4 rounded text-center">
-          <div className="text-sm mb-1">
-            Best statistical next bet
-          </div>
-
-          <div className="text-3xl font-bold text-yellow-400">
-            {recommendation}
-          </div>
-
-          {recommendation !== 'DO NOT PLAY' && (
-            <div className="text-sm mt-1">EV: {ev}%</div>
-          )}
-
-          {recommendation === 'DO NOT PLAY' && (
-            <div className="text-red-400 text-sm mt-1">
-              🚫 {advisorReason}
+        <div className={`${layoutClasses.grid} transition-all duration-300`}>
+          <section className={`${panelBase} ${layoutClasses.player} transition-all duration-300`}>
+            <h2 className={`${isCompact ? 'text-lg' : 'text-xl'} font-semibold mb-3`}>Player Cards</h2>
+            <CardGrid
+              disabled={false}
+              compact={isCompact}
+              onSelect={(c: Card) => setPlayerCards(p => [...p, c])}
+            />
+            <div className="mt-3 text-sm min-h-8">
+              {playerCards.map((c, i) => (
+                <span key={i} className={cardTokenClass(isCompact)}>
+                  {c}
+                </span>
+              ))}
             </div>
-          )}
+          </section>
 
-          <ConfidenceMeter value={confidence} />
-
-          <button
-            onClick={handleDone}
-            className="mt-4 w-full bg-yellow-400 text-black font-bold py-3 rounded text-lg"
+          <section
+            className={`${isCompact ? 'rounded-xl p-3' : 'rounded-2xl p-4 md:p-6'} bg-black/70 text-center shadow-2xl shadow-black/30 ${layoutClasses.center} ${layoutClasses.centerShell} transition-all duration-300`}
           >
-            DONE
-          </button>
+            <div className="text-xs md:text-sm uppercase tracking-[0.18em] text-green-100/75 mb-2">Best statistical next bet</div>
+            <div className="text-3xl md:text-4xl font-bold text-yellow-300 drop-shadow-sm tracking-wide">{recommendation}</div>
 
-          <button
-            onClick={resetShoe}
-            className="mt-2 text-sm text-red-300 underline"
-          >
-            Reset Shoe
-          </button>
+            {recommendation !== 'DO NOT PLAY' ? (
+              <div className="text-sm mt-2 text-green-100/95">Expected value: <span className="font-semibold text-yellow-200">{ev}%</span></div>
+            ) : (
+              <div className="text-red-300 text-sm mt-2">🚫 {advisorReason}</div>
+            )}
 
-          <div className="mt-3 text-xs">
-            Session hands recorded: {sessionHands}
-          </div>
+            <ConfidenceMeter value={confidence} compact={isCompact} />
 
-          <div className="text-xs">
-            Skipped bad spots: {skipCount}
-          </div>
+            <button
+              onClick={handleDone}
+              className={`mt-5 w-full bg-yellow-300 text-black font-extrabold rounded-xl shadow-lg shadow-yellow-400/25 hover:bg-yellow-200 active:scale-[0.99] transition ${activeLayout === 'mobile-stacked' ? 'py-4 text-xl' : isCompact ? 'py-2.5 text-base' : 'py-3.5 text-lg'}`}
+            >
+              DONE
+            </button>
+
+            <button
+              onClick={resetShoe}
+              className="mt-3 text-sm text-red-200 hover:text-red-100 underline underline-offset-4 transition"
+            >
+              Reset Shoe
+            </button>
+
+            <div className="mt-4 pt-3 border-t border-white/10 text-[11px] md:text-xs text-green-100/80 space-y-1">
+              <div>Session hands recorded: <span className="font-medium">{sessionHands}</span></div>
+              <div>Skipped bad spots: <span className="font-medium">{skipCount}</span></div>
+            </div>
+          </section>
+
+          <section className={`${panelBase} ${layoutClasses.banker} transition-all duration-300`}>
+            <h2 className={`${isCompact ? 'text-lg' : 'text-xl'} font-semibold mb-3`}>Banker Cards</h2>
+            <CardGrid
+              disabled={false}
+              compact={isCompact}
+              onSelect={(c: Card) => setBankerCards(b => [...b, c])}
+            />
+            <div className="mt-3 text-sm min-h-8">
+              {bankerCards.map((c, i) => (
+                <span key={i} className={cardTokenClass(isCompact)}>
+                  {c}
+                </span>
+              ))}
+            </div>
+          </section>
         </div>
-
-        {/* BANKER */}
-        <div className="bg-green-800 p-4 rounded">
-          <h2 className="text-xl mb-2">Banker Cards</h2>
-
-          <CardGrid
-            disabled={false}
-            onSelect={(c: Card) =>
-              setBankerCards(b => [...b, c])
-            }
-          />
-
-          <div className="mt-2 text-sm">
-            {bankerCards.map((c, i) => (
-              <span
-                key={i}
-                className="mr-1 px-2 py-1 bg-white text-black rounded"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-        </div>
-
       </div>
     </main>
   );
