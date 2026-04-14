@@ -1,22 +1,26 @@
+import { estimateNextHandProbabilities } from './baccaratEngine';
 import { Shoe } from './shoe';
 
-export function calculateEV(shoe: Shoe) {
-  let bankerBias = 0;
-  let playerBias = 0;
+export function calculateEV(shoe: Shoe, iterations = 50_000) {
+  const prediction = estimateNextHandProbabilities(shoe, { iterations });
 
-  for (const [card, count] of Object.entries(shoe)) {
-    if (['A','2','3','4'].includes(card)) bankerBias += count;
-    if (['6','7','8','9'].includes(card)) playerBias += count;
+  const playerEV = prediction.playerProbability - prediction.bankerProbability;
+  const bankerEV = prediction.bankerProbability * 0.95 - prediction.playerProbability;
+
+  if (playerEV <= 0 && bankerEV <= 0) {
+    return {
+      best: { side: 'SKIP' as const, ev: 0 },
+      prediction,
+    };
   }
 
-  const edge = (playerBias - bankerBias) / 1000;
-  const playerEV = edge;
-  const bankerEV = edge - 0.01;
-
-  return {
-    best:
-      bankerEV > playerEV
-        ? { side: 'BANKER' as const, ev: bankerEV }
-        : { side: 'PLAYER' as const, ev: playerEV },
-  };
+  return playerEV > bankerEV
+    ? {
+        best: { side: 'PLAYER' as const, ev: playerEV },
+        prediction,
+      }
+    : {
+        best: { side: 'BANKER' as const, ev: bankerEV },
+        prediction,
+      };
 }
