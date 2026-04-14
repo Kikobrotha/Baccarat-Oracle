@@ -5,6 +5,7 @@ import {
   countCards,
   Shoe,
 } from './shoe';
+import { cardPointValue, handTotal } from './baccarat';
 
 export type BaccaratOutcome = 'Player' | 'Banker' | 'Tie';
 
@@ -22,26 +23,6 @@ export interface BaccaratSimulationOptions {
 export interface ShoeCompositionInput {
   usedCards: Card[];
   decks?: number;
-}
-
-const CARD_POINT_VALUE: Record<Card, number> = {
-  A: 1,
-  '2': 2,
-  '3': 3,
-  '4': 4,
-  '5': 5,
-  '6': 6,
-  '7': 7,
-  '8': 8,
-  '9': 9,
-  '10': 0,
-  J: 0,
-  Q: 0,
-  K: 0,
-};
-
-function handTotal(cards: Card[]): number {
-  return cards.reduce((sum, card) => sum + CARD_POINT_VALUE[card], 0) % 10;
 }
 
 function drawRandomCard(shoe: Shoe): Card {
@@ -79,7 +60,7 @@ function shouldBankerDrawThirdCard(
     return bankerTotal <= 5;
   }
 
-  const playerThirdValue = CARD_POINT_VALUE[playerThirdCard];
+  const playerThirdValue = cardPointValue(playerThirdCard);
 
   if (bankerTotal <= 2) return true;
   if (bankerTotal === 3) return playerThirdValue !== 8;

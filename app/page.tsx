@@ -3,33 +3,23 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import CardGrid from '../components/CardGrid';
 import ConfidenceMeter from '../components/ConfidenceMeter';
-import { getRecommendationFromSimulation } from '../lib/recommendation';
-
-type Card = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
-type Result = 'Player' | 'Banker' | 'Tie';
-type LayoutPreset =
-  | 'classic'
-  | 'focus-center'
-  | 'wide-table'
-  | 'compact'
-  | 'mobile-stacked'
-  | 'auto';
-
-const layoutOptions: { value: LayoutPreset; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'classic', label: 'Classic' },
-  { value: 'focus-center', label: 'Focus Center' },
-  { value: 'wide-table', label: 'Wide Table' },
-  { value: 'compact', label: 'Compact' },
-  { value: 'mobile-stacked', label: 'Mobile Stacked' },
-];
-
-function cardTokenClass(compact: boolean) {
-  return compact
-    ? 'mr-1 mb-1 inline-flex px-2 py-0.5 text-xs bg-white/95 text-black rounded-md'
-    : 'mr-1.5 mb-1.5 inline-flex px-2.5 py-1 text-sm bg-white/95 text-black rounded-md';
-}
-
+import { getRecommendationFromSimulation, RecommendationAction } from '../lib/recommendation';
+import { Card } from '../lib/shoe';
+import {
+  cardTokenClass,
+  DEFAULT_PROBABILITIES,
+  DEFAULT_REASON,
+  formatEV,
+  formatProbability,
+  getLayoutClasses,
+  getSessionResultStats,
+  layoutOptions,
+  LayoutPreset,
+  mapEvBySide,
+  resolveRoundResult,
+  toEvPercent,
+} from '../lib/pageModel';
+import { BaccaratResult } from '../lib/baccarat';
 
 function useIsSmallScreen() {
   return useSyncExternalStore(
@@ -51,27 +41,17 @@ export default function Home() {
   const [playerCards, setPlayerCards] = useState<Card[]>([]);
   const [bankerCards, setBankerCards] = useState<Card[]>([]);
 
-  const [results, setResults] = useState<Result[]>([]);
+  const [results, setResults] = useState<BaccaratResult[]>([]);
   const [usedCards, setUsedCards] = useState<Card[]>([]);
   const [sessionHands, setSessionHands] = useState(0);
 
-  const [recommendation, setRecommendation] =
-    useState<'Player' | 'Banker' | 'Tie' | 'DO NOT PLAY'>('DO NOT PLAY');
+  const [recommendation, setRecommendation] = useState<RecommendationAction>('DO NOT PLAY');
 
   const [ev, setEv] = useState(0);
   const [confidence, setConfidence] = useState(0);
-  const [advisorReason, setAdvisorReason] =
-    useState('Need at least 12 completed hands before betting.');
-  const [predictionProbabilities, setPredictionProbabilities] = useState({
-    player: 0,
-    banker: 0,
-    tie: 0,
-  });
-  const [evBySide, setEvBySide] = useState({
-    player: 0,
-    banker: 0,
-    tie: 0,
-  });
+  const [advisorReason, setAdvisorReason] = useState(DEFAULT_REASON);
+  const [predictionProbabilities, setPredictionProbabilities] = useState(DEFAULT_PROBABILITIES);
+  const [evBySide, setEvBySide] = useState(DEFAULT_PROBABILITIES);
 
   const [skipCount, setSkipCount] = useState(0);
   const [selectedLayout, setSelectedLayout] = useState<LayoutPreset>(() => {
@@ -90,78 +70,17 @@ export default function Home() {
     localStorage.setItem('baccarat-ui-layout', selectedLayout);
   }, [selectedLayout]);
 
-  const activeLayout = selectedLayout === 'auto'
-    ? (isSmallScreen ? 'mobile-stacked' : 'classic')
-    : selectedLayout;
+  const activeLayout =
+    selectedLayout === 'auto' ? (isSmallScreen ? 'mobile-stacked' : 'classic') : selectedLayout;
 
   const isCompact = activeLayout === 'compact';
 
-  const layoutClasses = useMemo(() => {
-    switch (activeLayout) {
-      case 'focus-center':
-        return {
-          grid: 'grid grid-cols-1 xl:grid-cols-[minmax(220px,0.7fr)_minmax(520px,1.6fr)_minmax(220px,0.7fr)] gap-4 md:gap-6 items-stretch',
-          player: 'xl:order-1',
-          center: 'xl:order-2',
-          banker: 'xl:order-3',
-          centerShell: 'ring-1 ring-yellow-300/50 shadow-2xl shadow-black/35',
-        };
-      case 'wide-table':
-        return {
-          grid: 'grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch',
-          player: '',
-          center: '',
-          banker: '',
-          centerShell: 'bg-gradient-to-b from-black/60 to-black/40 border border-white/15',
-        };
-      case 'compact':
-        return {
-          grid: 'grid grid-cols-1 lg:grid-cols-3 gap-3 items-start',
-          player: '',
-          center: '',
-          banker: '',
-          centerShell: 'border border-white/10',
-        };
-      case 'mobile-stacked':
-        return {
-          grid: 'grid grid-cols-1 gap-4 items-start max-w-xl mx-auto',
-          player: 'order-2',
-          center: 'order-1',
-          banker: 'order-3',
-          centerShell: 'ring-1 ring-yellow-300/40',
-        };
-      default:
-        return {
-          grid: 'grid grid-cols-1 xl:grid-cols-3 gap-6 items-start',
-          player: '',
-          center: '',
-          banker: '',
-          centerShell: 'border border-white/10',
-        };
-    }
-  }, [activeLayout]);
-
-  function baccaratValue(card: Card) {
-    if (card === 'A') return 1;
-    if (['10', 'J', 'Q', 'K'].includes(card)) return 0;
-    return parseInt(card, 10);
-  }
-
-  function handTotal(cards: Card[]) {
-    return cards.reduce((sum, c) => sum + baccaratValue(c), 0) % 10;
-  }
-
-  function evaluateHand(): Result {
-    const p = handTotal(playerCards);
-    const b = handTotal(bankerCards);
-    if (p === b) return 'Tie';
-    return p > b ? 'Player' : 'Banker';
-  }
+  const layoutClasses = useMemo(() => getLayoutClasses(activeLayout), [activeLayout]);
 
   function handleDone() {
     if (playerCards.length === 0 || bankerCards.length === 0) return;
 
-    const outcome = evaluateHand();
+    const outcome = resolveRoundResult(playerCards, bankerCards);
     const handCards = [...playerCards, ...bankerCards];
     const allUsedCards = [...usedCards, ...handCards];
     const totalHands = results.length + 1;
@@ -175,19 +94,9 @@ export default function Home() {
     setRecommendation(recommendationData.action);
     setAdvisorReason(recommendationData.reason);
     setConfidence(recommendationData.confidence);
-    setEv(Number((recommendationData.bestEV * 100).toFixed(2)));
+    setEv(toEvPercent(recommendationData.bestEV));
     setPredictionProbabilities(recommendationData.probabilities);
-
-    const mappedEVs = recommendationData.options.reduce(
-      (acc, option) => {
-        if (option.side === 'Player') acc.player = Number((option.ev * 100).toFixed(2));
-        if (option.side === 'Banker') acc.banker = Number((option.ev * 100).toFixed(2));
-        if (option.side === 'Tie') acc.tie = Number((option.ev * 100).toFixed(2));
-        return acc;
-      },
-      { player: 0, banker: 0, tie: 0 },
-    );
-    setEvBySide(mappedEVs);
+    setEvBySide(mapEvBySide(recommendationData.options));
 
     if (recommendationData.action === 'DO NOT PLAY') {
       setSkipCount(prev => prev + 1);
@@ -203,13 +112,13 @@ export default function Home() {
     setRecommendation('DO NOT PLAY');
     setConfidence(0);
     setEv(0);
-    setAdvisorReason('Need at least 12 completed hands before betting.');
+    setAdvisorReason(DEFAULT_REASON);
     setSkipCount(0);
     setPlayerCards([]);
     setBankerCards([]);
     setUsedCards([]);
-    setPredictionProbabilities({ player: 0, banker: 0, tie: 0 });
-    setEvBySide({ player: 0, banker: 0, tie: 0 });
+    setPredictionProbabilities(DEFAULT_PROBABILITIES);
+    setEvBySide(DEFAULT_PROBABILITIES);
   }
 
   const metricRows = [
@@ -233,27 +142,7 @@ export default function Home() {
     },
   ];
 
-  function formatProbability(value: number) {
-    return `${(value * 100).toFixed(2)}%`;
-  }
-
-  function formatEV(value: number) {
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-  }
-
-  const sessionResultStats = useMemo(
-    () =>
-      results.reduce(
-        (acc, result) => {
-          if (result === 'Player') acc.player += 1;
-          if (result === 'Banker') acc.banker += 1;
-          if (result === 'Tie') acc.tie += 1;
-          return acc;
-        },
-        { player: 0, banker: 0, tie: 0 },
-      ),
-    [results],
-  );
+  const sessionResultStats = useMemo(() => getSessionResultStats(results), [results]);
 
   const panelBase = isCompact
     ? 'rounded-xl bg-green-800/75 p-3 shadow-lg shadow-black/20 backdrop-blur-sm'
@@ -290,11 +179,7 @@ export default function Home() {
         <div className={`${layoutClasses.grid} transition-all duration-300`}>
           <section className={`${panelBase} ${layoutClasses.player} transition-all duration-300`}>
             <h2 className={`${isCompact ? 'text-lg' : 'text-xl'} font-semibold mb-3`}>Player Cards</h2>
-            <CardGrid
-              disabled={false}
-              compact={isCompact}
-              onSelect={(c: Card) => setPlayerCards(p => [...p, c])}
-            />
+            <CardGrid disabled={false} compact={isCompact} onSelect={(c: Card) => setPlayerCards(p => [...p, c])} />
             <div className="mt-3 text-sm min-h-8">
               {playerCards.map((c, i) => (
                 <span key={i} className={cardTokenClass(isCompact)}>
@@ -364,11 +249,7 @@ export default function Home() {
 
           <section className={`${panelBase} ${layoutClasses.banker} transition-all duration-300`}>
             <h2 className={`${isCompact ? 'text-lg' : 'text-xl'} font-semibold mb-3`}>Banker Cards</h2>
-            <CardGrid
-              disabled={false}
-              compact={isCompact}
-              onSelect={(c: Card) => setBankerCards(b => [...b, c])}
-            />
+            <CardGrid disabled={false} compact={isCompact} onSelect={(c: Card) => setBankerCards(b => [...b, c])} />
             <div className="mt-3 text-sm min-h-8">
               {bankerCards.map((c, i) => (
                 <span key={i} className={cardTokenClass(isCompact)}>
